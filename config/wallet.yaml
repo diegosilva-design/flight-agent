@@ -1,0 +1,38 @@
+# Tu billetera de puntos. EDITA los saldos con los tuyos (los de abajo son ejemplos).
+# cpp = valor en centavos de dólar que TÚ le asignas a 1 punto (costo de oportunidad).
+# Si un premio rinde más cpp que este valor, conviene usar puntos; si rinde menos, conviene pagar cash.
+
+currencies:
+  Chase UR:        {balance: 50000, cpp: 1.5}
+  Amex MR:         {balance: 30000, cpp: 1.5}
+  Capital One:     {balance: 20000, cpp: 1.4}
+  United MileagePlus: {balance: 15000, cpp: 1.3}
+  Delta SkyMiles:  {balance: 10000, cpp: 1.1}
+  Avios (BA/Iberia/Qatar): {balance: 0, cpp: 1.4}
+
+# Qué monedas pueden financiar cada programa de premios y a qué razón.
+# ratio = puntos del programa que recibes por 1 punto de la moneda origen.
+award_programs:
+  United MileagePlus:
+    sources:
+      - {currency: United MileagePlus, ratio: 1.0}
+      - {currency: Chase UR, ratio: 1.0}
+  Delta SkyMiles:
+    sources:
+      - {currency: Delta SkyMiles, ratio: 1.0}
+      - {currency: Amex MR, ratio: 1.0}
+  Air Canada Aeroplan:
+    sources:
+      - {currency: Chase UR, ratio: 1.0}
+      - {currency: Amex MR, ratio: 1.0}
+      - {currency: Capital One, ratio: 1.0}
+  Avios:
+    sources:
+      - {currency: Avios (BA/Iberia/Qatar), ratio: 1.0}
+      - {currency: Chase UR, ratio: 1.0}
+      - {currency: Amex MR, ratio: 1.0}
+      - {currency: Capital One, ratio: 1.0}
+
+# Bonos de transferencia vigentes (porcentaje extra). Ej: 30 = 30% de bono.
+transfer_bonuses: []
+#  - {from: Amex MR, to: Avios, bonus_pct: 30, expires: 2026-11-30}

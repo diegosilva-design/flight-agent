@@ -1,0 +1,27 @@
+# Preferencias de viaje. Ajusta a tu gusto.
+
+time_value_per_hour: 12        # USD que "vale" una hora extra de viaje sobre la opción más rápida
+stop_penalty: 40               # USD de penalización por cada escala
+max_stops: 2
+default_cabin: economy
+avoid_basic_economy: false
+basic_economy_penalty: 60      # USD extra si es tarifa basic (sin cambios/equipaje)
+
+# Aeropuertos cercanos que el agente puede considerar al decir "nearby".
+nearby_airports:
+  SCL: []
+  SLC: [PVU, OGD]
+  NYC: [JFK, EWR, LGA]
+  WAS: [IAD, DCA, BWI]
+  LAX: [BUR, SNA, LGB, ONT]
+  SFO: [OAK, SJC]
+  MIA: [FLL, PBI]
+  CHO: [RIC, IAD, DCA]
+  CHI: [ORD, MDW]
+  LON: [LHR, LGW, STN, LTN, LCY]
+
+# Cuántos días de flexibilidad por defecto cuando el usuario dice "flexible".
+default_flex_days: 2
+
+# Moneda de reporte.
+currency: USD

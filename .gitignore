@@ -1,0 +1,5 @@
+# Corridas de búsqueda (datos personales, se generan localmente)
+data/runs/
+__pycache__/
+*.pyc
+.venv/

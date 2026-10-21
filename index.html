@@ -63,6 +63,11 @@ td input[type=number] { max-width: 130px; }
 #report h2 { font-size: 15px; margin: 20px 0 8px; }
 #report p { margin: 4px 0; }
 #report em { color: var(--muted); }
+.cmd { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; }
+.cmd code { flex: 1 1 260px; background: var(--page); border: 1px solid var(--border); border-radius: 8px;
+  padding: 7px 10px; font-size: 13px; overflow-wrap: anywhere; }
+input:not([type]), input[type=date] { background: var(--page); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 10px; width: 100%; }
 .hidden { display: none; }
 </style>
 </head>
@@ -75,7 +80,29 @@ td input[type=number] { max-width: 130px; }
   </header>
 
   <section class="card">
-    <h2>1. Opciones de vuelo (options.json)</h2>
+    <h2>1. Búsqueda</h2>
+    <div class="grid">
+      <label class="field">Origen<input id="s-origin" list="airports" autocomplete="off" placeholder="SCL" maxlength="40"></label>
+      <label class="field">Destino<input id="s-dest" list="airports" autocomplete="off" placeholder="SLC" maxlength="40"></label>
+      <label class="field">Ida<input id="s-depart" type="date"></label>
+      <label class="field" id="s-return-wrap">Vuelta<input id="s-return" type="date"></label>
+      <label class="field">Flexibilidad (± días)<input id="s-flex" type="number" min="0" max="14" step="1"></label>
+    </div>
+    <datalist id="airports"></datalist>
+    <div class="actions">
+      <label class="check"><input id="s-oneway" type="checkbox"> Solo ida</label>
+      <label class="check"><input id="s-nearby" type="checkbox"> Incluir aeropuertos cercanos</label>
+    </div>
+    <p class="note">Elige el aeropuerto escribiendo el código o la ciudad. Al evaluar, solo entran las opciones que calzan con esta búsqueda.</p>
+    <div class="cmd">
+      <code id="s-command"></code>
+      <button id="copy-command" type="button">Copiar comando</button>
+    </div>
+    <p class="note">Pega este comando en Claude Code para que el agente busque tarifas reales y genere el options.json.</p>
+  </section>
+
+  <section class="card">
+    <h2>2. Opciones de vuelo (options.json)</h2>
     <textarea id="options" spellcheck="false" aria-label="Contenido de options.json"></textarea>
     <div class="actions">
       <button id="load-sample" type="button">Cargar ejemplo</button>
@@ -85,7 +112,7 @@ td input[type=number] { max-width: 130px; }
   </section>
 
   <section class="card">
-    <h2>2. Preferencias</h2>
+    <h2>3. Preferencias</h2>
     <div class="grid">
       <label class="field">Valor de tu tiempo (USD/hora)<input id="p-time" type="number" min="0" step="1"></label>
       <label class="field">Penalización por escala (USD)<input id="p-stop" type="number" min="0" step="5"></label>
@@ -96,7 +123,7 @@ td input[type=number] { max-width: 130px; }
   </section>
 
   <section class="card">
-    <h2>3. Billetera de puntos</h2>
+    <h2>4. Billetera de puntos</h2>
     <div class="table-wrap">
       <table>
         <thead><tr><th>Moneda</th><th class="num">Saldo</th><th class="num">Tu valor (cpp)</th></tr></thead>
@@ -114,6 +141,7 @@ td input[type=number] { max-width: 130px; }
   <section class="card hidden" id="result-card">
     <h2>Resultado</h2>
     <div id="reco" class="reco hidden"></div>
+    <p id="filtered" class="note hidden"></p>
     <div id="report" class="table-wrap"></div>
   </section>
 </main>
@@ -124,6 +152,117 @@ td input[type=number] { max-width: 130px; }
 const STORE_KEY = "flight-agent:v1";
 const $ = (id) => document.getElementById(id);
 let py, base = null;
+
+// Aeropuertos sugeridos; también se acepta cualquier código IATA escrito a mano.
+const AIRPORTS = {
+  SCL: "Santiago, Chile", LIM: "Lima", BOG: "Bogotá", GRU: "São Paulo", EZE: "Buenos Aires", MEX: "Ciudad de México",
+  PTY: "Panamá", SLC: "Salt Lake City", PVU: "Provo", OGD: "Ogden", NYC: "Nueva York (todos)", JFK: "Nueva York JFK",
+  EWR: "Newark", LGA: "Nueva York LaGuardia", WAS: "Washington (todos)", IAD: "Washington Dulles",
+  DCA: "Washington National", BWI: "Baltimore", CHO: "Charlottesville", RIC: "Richmond", ATL: "Atlanta",
+  IAH: "Houston", DFW: "Dallas/Fort Worth", DEN: "Denver", LAX: "Los Ángeles", BUR: "Burbank", SNA: "Santa Ana",
+  LGB: "Long Beach", ONT: "Ontario CA", SFO: "San Francisco", OAK: "Oakland", SJC: "San José CA", SEA: "Seattle",
+  CHI: "Chicago (todos)", ORD: "Chicago O'Hare", MDW: "Chicago Midway", MIA: "Miami", FLL: "Fort Lauderdale",
+  PBI: "West Palm Beach", BOS: "Boston", YYZ: "Toronto", LON: "Londres (todos)", LHR: "Londres Heathrow",
+  LGW: "Londres Gatwick", STN: "Londres Stansted", LTN: "Londres Luton", LCY: "London City", MAD: "Madrid",
+  CDG: "París",
+};
+
+// "SCL — Santiago, Chile" o "scl" → "SCL"
+function airportCode(v) {
+  const m = String(v || "").trim().toUpperCase().match(/^[A-Z]{3}\b/);
+  return m ? m[0] : "";
+}
+function airportLabel(code) { return code ? (AIRPORTS[code] ? `${code} — ${AIRPORTS[code]}` : code) : ""; }
+
+function airportSet(code, nearby) {
+  const set = new Set([code]);
+  if (!nearby || !base) return set;
+  const map = base.prefs.nearby_airports || {};
+  (map[code] || []).forEach((c) => set.add(c));
+  // Si eligió un aeropuerto de una ciudad con varios (ej. JFK), acepta los demás de esa ciudad.
+  for (const [metro, list] of Object.entries(map)) {
+    if (metro === code || (list || []).includes(code)) { set.add(metro); (list || []).forEach((c) => set.add(c)); }
+  }
+  return set;
+}
+
+function readSearch() {
+  return {
+    origin: airportCode($("s-origin").value),
+    destination: airportCode($("s-dest").value),
+    depart: $("s-depart").value,
+    return: $("s-oneway").checked ? "" : $("s-return").value,
+    oneWay: $("s-oneway").checked,
+    nearby: $("s-nearby").checked,
+    flex: Math.max(0, Number($("s-flex").value) || 0),
+  };
+}
+
+function fillSearch(s) {
+  $("s-origin").value = airportLabel(s.origin);
+  $("s-dest").value = airportLabel(s.destination);
+  $("s-depart").value = s.depart || "";
+  $("s-return").value = s.return || "";
+  $("s-oneway").checked = !!s.oneWay;
+  $("s-nearby").checked = !!s.nearby;
+  $("s-flex").value = s.flex ?? 0;
+  updateSearchUI();
+}
+
+// Toma la búsqueda del bloque "search" de un options.json.
+function searchFromOptions(text) {
+  let srch = {};
+  try { srch = JSON.parse(text).search || {}; } catch {}
+  return {
+    origin: airportCode(srch.origin), destination: airportCode(srch.destination),
+    depart: srch.depart || "", return: srch.return || "", oneWay: !srch.return,
+    nearby: false, flex: 0,
+  };
+}
+
+function flightsCommand(s) {
+  if (!s.origin || !s.destination || !s.depart) return "Completa origen, destino y fecha de ida.";
+  const parts = [`/flights ${s.origin} -> ${s.destination}`];
+  parts.push(s.oneWay ? `solo ida ${s.depart}` : `${s.depart} to ${s.return || "?"}`);
+  if (s.flex) parts.push(`flexible ±${s.flex} days`);
+  if (s.nearby) parts.push("nearby airports ok");
+  return parts.join(", ");
+}
+
+function updateSearchUI() {
+  const oneWay = $("s-oneway").checked;
+  $("s-return-wrap").classList.toggle("hidden", oneWay);
+  $("s-return").min = $("s-depart").value || "";
+  if (!oneWay && $("s-return").value && $("s-depart").value && $("s-return").value < $("s-depart").value) {
+    $("s-return").value = $("s-depart").value;
+  }
+  $("s-command").textContent = flightsCommand(readSearch());
+}
+
+const dayDiff = (a, b) => Math.abs((new Date(a) - new Date(b)) / 86400000);
+
+// Deja solo las opciones que calzan con la búsqueda; un campo que la opción no trae no la descarta.
+function filterBySearch(options, s) {
+  const origins = s.origin ? airportSet(s.origin, s.nearby) : null;
+  const dests = s.destination ? airportSet(s.destination, s.nearby) : null;
+  const kept = [], dropped = [];
+  for (const o of options.options || []) {
+    let why = null;
+    if (origins && o.origin && !origins.has(String(o.origin).toUpperCase())) why = `origen ${o.origin}`;
+    else if (dests && o.destination && !dests.has(String(o.destination).toUpperCase())) why = `destino ${o.destination}`;
+    else if (s.depart && o.depart_date && dayDiff(o.depart_date, s.depart) > s.flex) why = `ida ${o.depart_date}`;
+    else if (s.oneWay && o.return_date) why = "es ida y vuelta";
+    else if (!s.oneWay && s.return && o.return_date && dayDiff(o.return_date, s.return) > s.flex) why = `vuelta ${o.return_date}`;
+    else if (!s.oneWay && s.return && "return_date" in o && !o.return_date) why = "es solo ida";
+    (why ? dropped : kept).push(why ? { id: o.id, why } : o);
+  }
+  const search = { ...(options.search || {}) };
+  if (s.origin) search.origin = s.origin;
+  if (s.destination) search.destination = s.destination;
+  if (s.depart) search.depart = s.depart;
+  if (s.oneWay) delete search.return; else if (s.return) search.return = s.return;
+  return [{ ...options, search, options: kept }, dropped];
+}
 
 function loadStore() { try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch { return {}; } }
 function saveStore(s) { try { localStorage.setItem(STORE_KEY, JSON.stringify(s)); } catch {} }
@@ -170,7 +309,8 @@ function readForm() {
 
 function persist() {
   const s = loadStore();
-  Object.assign(s, readForm(), { options: $("options").value, includeUnverified: $("include-unverified").checked });
+  Object.assign(s, readForm(), { options: $("options").value, includeUnverified: $("include-unverified").checked,
+    search: readSearch() });
   saveStore(s);
 }
 
@@ -206,6 +346,8 @@ json.dumps({"wallet": yaml.safe_load(open("/app/config/wallet.yaml", encoding="u
     $("options").value = s.options || sample;
     $("include-unverified").checked = !!s.includeUnverified;
     fillForm(...applyOverrides(base.prefs, base.wallet, s));
+    $("airports").innerHTML = Object.keys(AIRPORTS).map((c) => `<option value="${airportLabel(c)}"></option>`).join("");
+    fillSearch(s.search || { ...searchFromOptions($("options").value), flex: base.prefs.default_flex_days ?? 0 });
     $("run").disabled = false;
     setStatus("Listo.");
   } catch (e) {
@@ -219,7 +361,8 @@ async function run() {
   catch (e) { setStatus(`El options.json no es JSON válido: ${e.message}`, true); return; }
   persist();
   const [prefs, wallet] = applyOverrides(base.prefs, base.wallet, readForm());
-  py.FS.writeFile("/app/run/options.json", JSON.stringify(options));
+  const [filtered, dropped] = filterBySearch(options, readSearch());
+  py.FS.writeFile("/app/run/options.json", JSON.stringify(filtered));
   py.FS.writeFile("/app/run/wallet.json", JSON.stringify(wallet));
   py.FS.writeFile("/app/run/prefs.json", JSON.stringify(prefs));
   const args = ["evaluate.py", "/app/run/options.json", "--wallet", "/app/run/wallet.json", "--prefs", "/app/run/prefs.json"];
@@ -240,14 +383,19 @@ except SystemExit as e:
         raise`);
     const report = py.FS.readFile("/app/run/report.md", { encoding: "utf8" });
     const ranking = JSON.parse(py.FS.readFile("/app/run/ranking.json", { encoding: "utf8" }));
-    renderResult(report, ranking);
+    renderResult(report, ranking, dropped);
     setStatus("Listo.");
   } catch (e) {
     setStatus(`Error al evaluar: ${String(e.message || e).split("\n").filter(Boolean).pop()}`, true);
   }
 }
 
-function renderResult(report, ranking) {
+function renderResult(report, ranking, dropped) {
+  const f = $("filtered");
+  f.textContent = dropped.length
+    ? `${dropped.length} opción(es) fuera de esta búsqueda: ${dropped.map((d) => `${d.id} (${d.why})`).join(", ")}.`
+    : "";
+  f.classList.toggle("hidden", !dropped.length);
   const best = ranking.ranking && ranking.ranking[0];
   const reco = $("reco");
   if (best) {
@@ -265,14 +413,31 @@ function renderResult(report, ranking) {
 }
 
 $("run").addEventListener("click", run);
-$("load-sample").addEventListener("click", () => { $("options").value = base ? base.sample : ""; persist(); });
+// Al cargar otras opciones, la búsqueda toma su origen, destino y fechas.
+function setOptions(text) {
+  $("options").value = text;
+  const s = searchFromOptions(text);
+  if (s.origin || s.depart) fillSearch({ ...s, nearby: $("s-nearby").checked, flex: Number($("s-flex").value) || 0 });
+  persist();
+}
+$("load-sample").addEventListener("click", () => setOptions(base ? base.sample : ""));
 $("pick-file").addEventListener("click", () => $("file").click());
 $("file").addEventListener("change", async (e) => {
   const f = e.target.files[0];
-  if (f) { $("options").value = await f.text(); persist(); }
+  if (f) setOptions(await f.text());
+});
+["s-origin", "s-dest", "s-depart", "s-return", "s-oneway", "s-nearby", "s-flex"].forEach((id) =>
+  $(id).addEventListener("input", updateSearchUI));
+["s-origin", "s-dest"].forEach((id) => $(id).addEventListener("change", (e) => {
+  const c = airportCode(e.target.value);
+  if (c) e.target.value = airportLabel(c);
+}));
+$("copy-command").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText($("s-command").textContent); setStatus("Comando copiado."); }
+  catch { setStatus("No se pudo copiar; selecciona el texto y cópialo a mano.", true); }
 });
 $("reset").addEventListener("click", () => {
-  saveStore({ options: $("options").value });
+  saveStore({ options: $("options").value, search: readSearch() });
   if (base) fillForm(base.prefs, base.wallet);
 });
 document.addEventListener("change", (e) => { if (base && e.target.closest("main")) persist(); });

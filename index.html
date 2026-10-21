@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Evaluador de vuelos</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7; --surface: #fcfcfb; --text-primary: #0b0b0b; --text-secondary: #52514e;
+  --muted: #898781; --grid: #e1e0d9; --border: rgba(11,11,11,0.10);
+  --accent: #2a78d6; --accent-soft: #b7d3f6;
+  --good: #006300; --warning: #9a6700; --critical: #d03b3b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --text-primary: #ffffff; --text-secondary: #c3c2b7;
+    --muted: #898781; --grid: #2c2c2a; --border: rgba(255,255,255,0.10);
+    --accent: #3987e5; --accent-soft: #1c5cab;
+    --good: #0ca30c; --warning: #fab219; --critical: #e66767;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --text-primary: #ffffff; --text-secondary: #c3c2b7;
+  --muted: #898781; --grid: #2c2c2a; --border: rgba(255,255,255,0.10);
+  --accent: #3987e5; --accent-soft: #1c5cab;
+  --good: #0ca30c; --warning: #fab219; --critical: #e66767;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--text-primary);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 1100px; margin: 0 auto; padding: 32px 16px 64px; }
+header h1 { font-size: 26px; margin: 0 0 4px; letter-spacing: -0.01em; }
+header p { margin: 0; color: var(--text-secondary); }
+.note { font-size: 13px; color: var(--muted); margin-top: 6px; }
+section.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 16px; margin-top: 20px; }
+section.card h2 { font-size: 16px; margin: 0 0 12px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+label.field { display: flex; flex-direction: column; font-size: 12px; color: var(--text-secondary); gap: 4px; }
+label.check { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+input, textarea, button { font: inherit; color: var(--text-primary); }
+input[type=number], textarea { background: var(--page); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 10px; width: 100%; }
+textarea { font: 13px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; min-height: 220px; resize: vertical; }
+input:focus-visible, textarea:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; align-items: center; }
+button { border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 7px 14px; cursor: pointer; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+button:disabled { opacity: .5; cursor: default; }
+.status { font-size: 13px; color: var(--text-secondary); }
+.status.error { color: var(--critical); }
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th { color: var(--text-secondary); font-weight: 600; font-size: 12px; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td input[type=number] { max-width: 130px; }
+.reco { border-left: 4px solid var(--accent); padding: 8px 12px; margin-bottom: 12px; font-size: 16px; }
+#report h1 { font-size: 20px; margin: 0 0 4px; }
+#report h2 { font-size: 15px; margin: 20px 0 8px; }
+#report p { margin: 4px 0; }
+#report em { color: var(--muted); }
+.hidden { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Evaluador de vuelos: cash vs puntos</h1>
+    <p>Pega las opciones que encontró el agente, ajusta tus preferencias y tu billetera, y mira qué conviene reservar y cómo pagarlo.</p>
+    <p class="note">Esta página solo hace el cálculo, con el mismo <code>scripts/evaluate.py</code> del repo. La búsqueda en vivo se hace con <code>/flights</code> en Claude Code. Tus cambios se guardan solo en este navegador.</p>
+  </header>
+
+  <section class="card">
+    <h2>1. Opciones de vuelo (options.json)</h2>
+    <textarea id="options" spellcheck="false" aria-label="Contenido de options.json"></textarea>
+    <div class="actions">
+      <button id="load-sample" type="button">Cargar ejemplo</button>
+      <label><input id="file" type="file" accept=".json,application/json" class="hidden"><button type="button" id="pick-file">Subir archivo…</button></label>
+      <label class="check"><input id="include-unverified" type="checkbox"> Incluir opciones no verificadas</label>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>2. Preferencias</h2>
+    <div class="grid">
+      <label class="field">Valor de tu tiempo (USD/hora)<input id="p-time" type="number" min="0" step="1"></label>
+      <label class="field">Penalización por escala (USD)<input id="p-stop" type="number" min="0" step="5"></label>
+      <label class="field">Máximo de escalas<input id="p-maxstops" type="number" min="0" max="4" step="1"></label>
+      <label class="field">Penalización basic economy (USD)<input id="p-basic" type="number" min="0" step="5"></label>
+    </div>
+    <div class="actions"><label class="check"><input id="p-avoid" type="checkbox"> Penalizar tarifas basic economy</label></div>
+  </section>
+
+  <section class="card">
+    <h2>3. Billetera de puntos</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Moneda</th><th class="num">Saldo</th><th class="num">Tu valor (cpp)</th></tr></thead>
+        <tbody id="wallet-rows"></tbody>
+      </table>
+    </div>
+    <p class="note">cpp = centavos de dólar que tú le asignas a cada punto. Si un premio rinde más que esto, conviene usar puntos.</p>
+    <div class="actions">
+      <button class="primary" id="run" type="button" disabled>Evaluar</button>
+      <button id="reset" type="button">Restablecer valores del repo</button>
+      <span id="status" class="status" role="status">Cargando el motor de Python…</span>
+    </div>
+  </section>
+
+  <section class="card hidden" id="result-card">
+    <h2>Resultado</h2>
+    <div id="reco" class="reco hidden"></div>
+    <div id="report" class="table-wrap"></div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script>
+const STORE_KEY = "flight-agent:v1";
+const $ = (id) => document.getElementById(id);
+let py, base = null;
+
+function loadStore() { try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch { return {}; } }
+function saveStore(s) { try { localStorage.setItem(STORE_KEY, JSON.stringify(s)); } catch {} }
+
+async function fetchText(path) {
+  const r = await fetch(path, { cache: "no-cache" });
+  if (!r.ok) throw new Error(`No se pudo leer ${path} (${r.status})`);
+  return r.text();
+}
+
+function setStatus(msg, isError = false) { $("status").textContent = msg; $("status").classList.toggle("error", isError); }
+
+function fillForm(prefs, wallet) {
+  $("p-time").value = prefs.time_value_per_hour ?? 0;
+  $("p-stop").value = prefs.stop_penalty ?? 0;
+  $("p-maxstops").value = prefs.max_stops ?? 2;
+  $("p-basic").value = prefs.basic_economy_penalty ?? 0;
+  $("p-avoid").checked = !!prefs.avoid_basic_economy;
+  const rows = Object.entries(wallet.currencies || {}).map(([name, c]) => `
+    <tr data-currency="${name.replace(/"/g, "&quot;")}">
+      <td>${name.replace(/</g, "&lt;")}</td>
+      <td class="num"><input type="number" min="0" step="1000" value="${c.balance ?? 0}" aria-label="Saldo ${name}" data-k="balance"></td>
+      <td class="num"><input type="number" min="0" step="0.1" value="${c.cpp ?? 0}" aria-label="cpp ${name}" data-k="cpp"></td>
+    </tr>`);
+  $("wallet-rows").innerHTML = rows.join("");
+}
+
+function readForm() {
+  const prefs = {
+    time_value_per_hour: Number($("p-time").value),
+    stop_penalty: Number($("p-stop").value),
+    max_stops: Number($("p-maxstops").value),
+    basic_economy_penalty: Number($("p-basic").value),
+    avoid_basic_economy: $("p-avoid").checked,
+  };
+  const currencies = {};
+  document.querySelectorAll("#wallet-rows tr").forEach((tr) => {
+    const c = {};
+    tr.querySelectorAll("input").forEach((i) => { c[i.dataset.k] = Number(i.value); });
+    currencies[tr.dataset.currency] = c;
+  });
+  return { prefs, currencies };
+}
+
+function persist() {
+  const s = loadStore();
+  Object.assign(s, readForm(), { options: $("options").value, includeUnverified: $("include-unverified").checked });
+  saveStore(s);
+}
+
+function applyOverrides(prefs, wallet, s) {
+  const p = { ...prefs, ...(s.prefs || {}) };
+  const w = structuredClone(wallet);
+  for (const [name, c] of Object.entries(s.currencies || {})) {
+    if (w.currencies && w.currencies[name]) Object.assign(w.currencies[name], c);
+  }
+  return [p, w];
+}
+
+async function init() {
+  try {
+    const [evalSrc, walletYaml, prefsYaml, sample] = await Promise.all([
+      fetchText("scripts/evaluate.py"), fetchText("config/wallet.yaml"),
+      fetchText("config/preferences.yaml"), fetchText("data/sample_options.json"),
+    ]);
+    base = { sample };
+    py = await loadPyodide();
+    await py.loadPackage("pyyaml");
+    py.FS.mkdirTree("/app/scripts"); py.FS.mkdirTree("/app/config"); py.FS.mkdirTree("/app/run");
+    py.FS.writeFile("/app/scripts/evaluate.py", evalSrc);
+    py.FS.writeFile("/app/config/wallet.yaml", walletYaml);
+    py.FS.writeFile("/app/config/preferences.yaml", prefsYaml);
+    const parsed = py.runPython(`
+import json, yaml
+json.dumps({"wallet": yaml.safe_load(open("/app/config/wallet.yaml", encoding="utf-8")) or {},
+            "prefs": yaml.safe_load(open("/app/config/preferences.yaml", encoding="utf-8")) or {}})`);
+    Object.assign(base, JSON.parse(parsed));
+
+    const s = loadStore();
+    $("options").value = s.options || sample;
+    $("include-unverified").checked = !!s.includeUnverified;
+    fillForm(...applyOverrides(base.prefs, base.wallet, s));
+    $("run").disabled = false;
+    setStatus("Listo.");
+  } catch (e) {
+    setStatus(`Error al cargar: ${e.message}`, true);
+  }
+}
+
+async function run() {
+  let options;
+  try { options = JSON.parse($("options").value); }
+  catch (e) { setStatus(`El options.json no es JSON válido: ${e.message}`, true); return; }
+  persist();
+  const [prefs, wallet] = applyOverrides(base.prefs, base.wallet, readForm());
+  py.FS.writeFile("/app/run/options.json", JSON.stringify(options));
+  py.FS.writeFile("/app/run/wallet.json", JSON.stringify(wallet));
+  py.FS.writeFile("/app/run/prefs.json", JSON.stringify(prefs));
+  const args = ["evaluate.py", "/app/run/options.json", "--wallet", "/app/run/wallet.json", "--prefs", "/app/run/prefs.json"];
+  if ($("include-unverified").checked) args.push("--include-unverified");
+  setStatus("Calculando…");
+  try {
+    py.globals.set("ARGS", py.toPy(args));
+    // JSON es YAML válido, así que evaluate.py lee wallet/prefs sin cambios.
+    py.runPython(`
+import sys, runpy, io, contextlib
+sys.argv = list(ARGS)
+buf = io.StringIO()
+try:
+    with contextlib.redirect_stdout(buf):
+        runpy.run_path("/app/scripts/evaluate.py", run_name="__main__")
+except SystemExit as e:
+    if e.code not in (0, None):
+        raise`);
+    const report = py.FS.readFile("/app/run/report.md", { encoding: "utf8" });
+    const ranking = JSON.parse(py.FS.readFile("/app/run/ranking.json", { encoding: "utf8" }));
+    renderResult(report, ranking);
+    setStatus("Listo.");
+  } catch (e) {
+    setStatus(`Error al evaluar: ${String(e.message || e).split("\n").filter(Boolean).pop()}`, true);
+  }
+}
+
+function renderResult(report, ranking) {
+  const best = ranking.ranking && ranking.ranking[0];
+  const reco = $("reco");
+  if (best) {
+    const how = best.type === "cash" ? "pagando en efectivo"
+      : `con ${best.points_used.toLocaleString("es-CL")} pts de ${best.funding.currency}` + (best.cash_out ? ` + $${Math.round(best.cash_out).toLocaleString("es-CL")}` : "");
+    reco.textContent = `Recomendación: ${best.id} (${best.route}) ${how}. Costo efectivo $${Math.round(best.effective_cost).toLocaleString("es-CL")}.`;
+    reco.classList.remove("hidden");
+  } else {
+    reco.textContent = "Ninguna opción quedó en el ranking: revisa las excluidas abajo.";
+    reco.classList.remove("hidden");
+  }
+  $("report").innerHTML = marked.parse(report);
+  $("result-card").classList.remove("hidden");
+  $("result-card").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+$("run").addEventListener("click", run);
+$("load-sample").addEventListener("click", () => { $("options").value = base ? base.sample : ""; persist(); });
+$("pick-file").addEventListener("click", () => $("file").click());
+$("file").addEventListener("change", async (e) => {
+  const f = e.target.files[0];
+  if (f) { $("options").value = await f.text(); persist(); }
+});
+$("reset").addEventListener("click", () => {
+  saveStore({ options: $("options").value });
+  if (base) fillForm(base.prefs, base.wallet);
+});
+document.addEventListener("change", (e) => { if (base && e.target.closest("main")) persist(); });
+init();
+</script>
+</body>
+</html>

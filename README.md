@@ -10,6 +10,13 @@ claude                              # abre Claude Code en esta carpeta
 ```
 Para buscar en vivo necesitas la extensión **Claude in Chrome** (Google Flights y sitios de aerolíneas con tus sesiones iniciadas). Opcional: cuenta en seats.aero para disponibilidad de premios multi-programa.
 
+## Sitio de prueba
+**https://diegosilva-design.github.io/flight-agent/**
+
+Página (`index.html`) que corre el mismo `scripts/evaluate.py` en el navegador (con Pyodide). Pegas o subes un `options.json`, ajustas preferencias y billetera, y ves el ranking. No busca vuelos: la búsqueda en vivo se hace con `/flights` en Claude Code. Los cambios que hagas en la página se guardan solo en tu navegador; los valores por defecto salen de `config/`.
+
+Se publica con GitHub Pages desde `main` (carpeta raíz): cada merge a `main` actualiza el sitio en 1–2 minutos.
+
 ## Configuración (una vez)
 1. `config/wallet.yaml`: tus saldos, el valor en centavos (`cpp`) que le asignas a cada punto, y qué monedas financian cada programa. Anota bonos de transferencia vigentes.
 2. `config/preferences.yaml`: cuánto vale tu tiempo por hora, penalización por escala, máximo de escalas, aeropuertos cercanos.
